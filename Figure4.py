@@ -94,7 +94,7 @@ BIN_LABELS = [
 BIN_MIDPOINTS = np.array([0.10, 0.30, 0.50, 0.70, 0.90])
 
 ROOT = Path(__file__).resolve().parent
-INPUT_FILE = ROOT / "EsVirutu_abundance_metadata.tsv"
+INPUT_FILE = ROOT / "EsViritu_abundance_metadata.tsv"
 OUTPUT_DIR = ROOT
 
 DETECTION_THRESHOLD = 0.0
