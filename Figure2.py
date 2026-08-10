@@ -48,7 +48,7 @@ from statsmodels.stats.multitest import multipletests
 # Repository paths
 # The script and input data are stored directly in the repository root.
 ROOT = Path(__file__).resolve().parent
-INPUT_FILE = ROOT / "EsVirutu_abundance_metadata.tsv"
+INPUT_FILE = ROOT / "EsViritu_abundance_metadata.tsv"
 OUTPUT_DIR = ROOT
 
 ALPHA = 0.05
