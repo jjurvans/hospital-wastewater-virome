@@ -44,6 +44,7 @@ import seaborn as sns
 from scipy.spatial.distance import braycurtis, jaccard
 from scipy.stats import linregress, pearsonr
 from statsmodels.stats.multitest import multipletests
+from scipy.stats import linregress, pearsonr, spearmanr
 
 ROOT = Path(__file__).resolve().parent
 input_file = ROOT / "EsViritu_abundance_metadata.tsv"
