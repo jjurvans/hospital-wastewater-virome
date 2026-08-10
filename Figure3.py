@@ -45,7 +45,7 @@ from scipy.stats import linregress, pearsonr
 from statsmodels.stats.multitest import multipletests
 
 ROOT = Path(__file__).resolve().parent
-input_file = ROOT / "EsVirutu_abundance_metadata.tsv"
+input_file = ROOT / "EsViritu_abundance_metadata.tsv"
 output_dir = ROOT
 
 output_prefix = "Homo_species_temporal_distance_decay"
