@@ -1,5 +1,8 @@
 # Hospital wastewater reflects the virome of the patient population rather than community pathogen transmission
 
+<img width="4303" height="1357" alt="README_monthly_viral_family_composition" src="https://github.com/user-attachments/assets/4dec011d-ba66-49e7-8557-3e01ad19a201" />
+
+
 This repository contains the data and analysis scripts used to generate the main statistical analyses and figures for the manuscript **“Hospital wastewater reflects the virome of the patient population rather than community pathogen transmission”**.
 
 The Python analyses can be run directly using GitHub Codespaces. The MaAsLin3 analysis used for Figure 5 was performed separately in R, and its output is provided so that Figure 5 can be reproduced without rerunning MaAsLin3.
