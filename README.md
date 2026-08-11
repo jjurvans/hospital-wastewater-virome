@@ -1,7 +1,6 @@
 # Hospital wastewater reflects the virome of the patient population rather than community pathogen transmission
 
-<img width="4303" height="1357" alt="README_monthly_viral_family_composition" src="https://github.com/user-attachments/assets/4dec011d-ba66-49e7-8557-3e01ad19a201" />
-
+<img width="4303" height="1357" alt="README_monthly_viral_family_composition" src="https://github.com/user-attachments/assets/8c671059-cd4e-491a-a608-f36a6226372a" />
 
 This repository contains the data and analysis scripts used to generate the main statistical analyses and figures for the manuscript **“Hospital wastewater reflects the virome of the patient population rather than community pathogen transmission”**.
 
