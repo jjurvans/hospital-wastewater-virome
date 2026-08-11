@@ -74,3 +74,15 @@ If using these data or scripts, please cite:
 **Hospital wastewater reflects the virome of the patient population rather than community pathogen transmission**
 
 Full publication details will be added following publication.
+
+---
+### Contact
+
+This repository is maintained by Jaana Jurvansuu, PhD, Adjunct Professor, Tampere University, AIvoa — Applied AI and Modelling for Biological Sciences.  
+
+For collaboration or implementation enquiries, please connect via [LinkedIn](https://www.linkedin.com/in/jaanajurvansuu/).
+
+### **Note**
+
+The original scripts were generated with assistance from ChatGPT (OpenAI) and has been subsequently reviewed, modified, and tested by the repository author.
+
