@@ -50,13 +50,13 @@ The following abbreviations are used throughout the data and scripts:
 - **TRE** – Tampere
 - **KUO** – Kuopio
 
-## Requirements
+## Dependencies
 
 The Python analyses were performed using Python 3.11.9. Required Python packages and versions are provided in `requirements.txt`.
 
 ## Running the analyses in GitHub Codespaces
 
-Open the repository in GitHub Codespaces. The development container installs the Python dependencies listed in `requirements.txt`.
+Open the repository in GitHub Codespaces. The development container installs the Python dependencies, but if it does not install them with ```python -m pip install -r requirements.txt```.
 
 Each analysis can then be run from the terminal:
 
