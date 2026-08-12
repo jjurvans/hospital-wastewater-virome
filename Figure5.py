@@ -68,7 +68,7 @@ from scipy.stats import pearsonr, spearmanr
 DPI = 300
 
 ROOT = Path(__file__).resolve().parent
-INPUT_FILE = ROOT / "EsVirutu_abundance_metadata.tsv"
+INPUT_FILE = ROOT / "EsViritu_abundance_metadata.tsv"
 MAASLIN_RESULTS_FILE = ROOT / "Figure5_MaAsLin3_results.tsv"
 OUTPUT_DIR = ROOT
 
