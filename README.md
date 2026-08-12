@@ -39,6 +39,9 @@ Performs the MaAsLin3 differential abundance and prevalence analyses for UH vers
 `Figure5.py`  
 Generates the analyses and visualisations associated with Figure 5 using `EsVirutu_abundance_metadata.tsv` and the supplied `Figure5_MaAsLin3_results.tsv`.
 
+`Pubmed_human_virus_immunocompromised_context.py` and `Pubmed_human_virus_seasonality.py`
+Search PubMed for evidence of viral reactivation or persistence in immunocompromised human hosts or explicitly relevant to seasonality or recurring temporal patterns.
+
 ## Wastewater environments and study locations
 
 The following abbreviations are used throughout the data and scripts:
