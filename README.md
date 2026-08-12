@@ -69,9 +69,10 @@ python Figure5.py
 
 Output figures and associated result tables are written directly to the repository working directory.
 
-## Codespaces Notes
+### Codespaces Notes
 
-- If Codespaces the depencies are not automatically installed then install them with ```python -m pip install -r requirements.txt```.
+- If the depencies are not automatically installed, install them with ```python -m pip install -r requirements.txt```.
+- If Safari does not open figures, try Google Chrome or other browsers.
 
 ## Citation
 
