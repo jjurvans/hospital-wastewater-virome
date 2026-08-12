@@ -56,7 +56,7 @@ The Python analyses were performed using Python 3.11.9. Required Python packages
 
 ## Running the analyses in GitHub Codespaces
 
-Open the repository in GitHub Codespaces. The development container installs the Python dependencies, but if it does not install them with ```python -m pip install -r requirements.txt```.
+Open the repository in GitHub Codespaces. The development container installs the Python dependencies.
 
 Each analysis can then be run from the terminal:
 
@@ -68,6 +68,10 @@ python Figure5.py
 ```
 
 Output figures and associated result tables are written directly to the repository working directory.
+
+## Codespaces Notes
+
+- If Codespaces the depencies are not automatically installed then install them with ```python -m pip install -r requirements.txt```.
 
 ## Citation
 
