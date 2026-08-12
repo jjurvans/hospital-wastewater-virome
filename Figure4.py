@@ -2350,7 +2350,7 @@ def main() -> None:
         positive_counts=positive_counts,
         selected_species=selected_species,
         output_figure=(
-            output_dir
+            OUTPU_DIR
             / "Figure4_E_prevalence_heatmap.png"
         ),
         output_table=(
