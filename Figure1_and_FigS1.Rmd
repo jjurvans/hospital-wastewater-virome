@@ -1,0 +1,1048 @@
+---
+title: "Hospital wastewater virome"
+author: "Eevi Sipponen"
+date: 'Aug 13 2026'
+output: html_document
+---
+
+Script for producing Figure 1 and Suppelementary Figure 1.
+
+```{r define-colors-to-use}
+site_cat_colors <- c("WWTP" = "#2E86C1",
+                     "UH" = "#E67E22",
+                     "SA" = "#42a16a")
+
+
+other_colors <- c("#CC79A7", "#D55E00", "#56B4E9", "#332288", "#44AA99", 
+                  "#AA4499", "#117733", "#88CCEE", "#F0E442", "#000000")
+```
+
+## Load libraries
+
+```{r message=FALSE, warning=FALSE}
+library(data.table)
+library(openxlsx)
+library(ggplot2)
+library(ggtree)
+library(cowplot)
+library(ade4)
+library(dplyr)
+library(vegan)
+library(tidyr)
+library(DescTools)
+library(stringr)
+```
+
+## Define path to use
+
+User defined path containing required files to produce figures
+- EsViritu_abundance_metadata.tsv
+
+Profuced figures are set to be saved to the same location.
+
+```{r}
+path = "path/to/files"
+```
+
+
+## Load data
+
+```{r}
+data_file <- file.path(path, "EsViritu_abundance_metadata.tsv")
+
+esviritu_passive_filt <- fread(data_file) %>%
+  mutate(Site_cat = case_when(str_detect(sample_ID, "WWTP") ~ "WWTP",
+                            str_detect(sample_ID, "UH") ~ "UH",
+                            str_detect(sample_ID, "SA") ~ "SA",
+                            TRUE ~ NA_character_),
+         City = case_when(str_detect(sample_ID, "TRE") ~ "TRE",
+                            str_detect(sample_ID, "KUO") ~ "KUO",
+                            TRUE ~ NA_character_)) %>%
+  filter(host_species != "Contamination")
+
+```
+
+## Supplementary figure S1
+
+### Mapped reads and viral read proportions
+
+Viral reads and viral read proportion of all reads
+```{r}
+summarize_viral_reads <- function(data){
+  data %>%
+    group_by(sample_ID) %>%
+    summarize(total_mapped=sum(read_count),
+              total_reads=first(filtered_reads_in_sample),
+              viral_reads_percentage=(total_mapped/total_reads)*100,
+              .groups="drop")
+}
+```
+
+```{r}
+#plot viral read proportion of all samples
+plot_S1A <- function(data, colors){
+  ggplot(data=data, aes(x="",y=viral_reads_percentage)) +
+    geom_boxplot(fill=colors) +
+   # scale_fill_manual(values=colors) +
+    stat_summary(fun="median", geom="text", aes(label=signif(after_stat(y),2), vjust=-0.5)) +
+    theme_bw()+
+    labs(y = "Percentage",
+         x="") +
+    theme(axis.text.y = element_text(size=10),
+          title = element_text(size=10),
+          legend.position = "none") + 
+    scale_y_continuous(labels = function(x) paste0(x, "%"))
+
+}
+
+
+#plot number of viral reads for all samples
+plot_S1B <- function(data, colors){
+  ggplot(data=data, aes(x="",y=total_mapped)) +
+    geom_boxplot(fill=colors) +
+    #scale_fill_manual(values=colors) +
+    stat_summary(fun="median", geom="text", aes(label=round(after_stat(y),2), vjust=-0.5)) +
+    theme_bw()+
+    labs(y = "Reads aligned to viral genomes (N)",
+         x="") +
+    scale_y_log10() +
+    theme(axis.text.x = element_text(angle=45),
+          axis.text.y = element_text(size=10),
+          title = element_text(size=10),
+          legend.position = "none")
+}
+```
+
+```{r}
+v_reads_all <- summarize_viral_reads(esviritu_passive_filt)
+
+Fig_S1A <- plot_S1A(v_reads_all, other_colors[1])
+
+Fig_S1B <- plot_S1B(v_reads_all,other_colors[1])
+
+plot_grid(Fig_S1A, Fig_S1B, ncol=2)
+
+ggsave(plot_grid(Fig_S1A, Fig_S1B, ncol=2), 
+       file = file.path(data_dir, "Fig_S1AB.jpg"), 
+       width = 6, height = 4, units = "in", dpi=300)
+```
+
+### Assembly coverage boxplots
+
+```{r}
+esviritu_passive_meta_coverage <- esviritu_passive_filt  %>%
+  mutate(coverage = covered_bases/Asm_length) %>%
+  mutate(cov_category = case_when(
+    coverage >= 0.9 ~ "Over 90%",
+    coverage < 0.9 & coverage >= 0.5 ~ "50% to 90%",
+    coverage < 0.5 & coverage >= 0.1 ~ "10% to 50%",
+    TRUE ~ "< 10%"
+  ))
+```
+
+```{r}
+median_category <- esviritu_passive_meta_coverage %>%
+  group_by(sample_ID, cov_category) %>%
+  summarize(seqs = n_distinct(Assembly)) %>%
+  ungroup() %>%
+  group_by(cov_category) %>%
+  summarize(median=median(seqs))
+
+
+violin_data <- esviritu_passive_meta_coverage %>%
+  group_by(sample_ID, cov_category) %>%
+  summarize(seqs = n_distinct(Assembly)) %>%
+  group_by(cov_category) %>%
+  mutate(cov_category = factor(cov_category, levels = c("< 10%",
+                                                        "10% to 50%",
+                                                        "50% to 90%",
+                                                        "Over 90%")))
+
+Fig_S1C <- ggplot(data=violin_data, aes(x=seqs, y=cov_category, fill = cov_category, alpha = 0.7)) +
+  geom_violin(alpha=0.6,color = "grey20", draw_quantiles = c(0.5)) +
+  scale_fill_manual(values = other_colors) +
+  scale_color_manual(values = other_colors) +
+  stat_summary(fun = median, geom = "text", aes(label = round(..x.., 1)), angle=90,, vjust=1.2)+
+  xlim(c(0,170)) +
+  theme_bw() +
+  labs(x = "Reference assemblies\nwith coverage level per sample (N)",
+       y = "Assembly coverage") +
+  theme(legend.position = "Off",
+        axis.text.x = element_text(size=12),
+        strip.text = element_text(size=12),
+        text = element_text(size=14))
+
+
+Fig_S1C
+
+ggsave(Fig_S1C, 
+       file = file.path(data_dir, "Fig_S1C"), 
+       width = 7.2, height = 4, units = "in", dpi=300)
+```
+### Taxa accumulation plot
+
+```{r}
+RPKMF_rank <- function(data, tax_level){
+  RPKMF_df <- data %>%
+    group_by(sample_ID, !!sym(tax_level)) %>%
+    #sum tax level RPKMF values at sample level
+    summarize(RPKMF = sum(RPKMF_norm)) %>%
+    ungroup()
+  
+  #transform long df to wider format, replace missing RPKMF values with 0
+  RPKMF_df_long <- pivot_wider(data=RPKMF_df,
+                    names_from = sample_ID,
+                    values_from = RPKMF,
+                    values_fill = list(RPKMF=0))
+  
+  
+  return(RPKMF_df_long)
+}
+
+species_accumulation <- function(data, taxa_level){
+  data <- as.data.frame(data[,c(-1)])
+  rownames(data) <- data[[taxa_level]]
+  
+  accumulation <- specaccum(t(data), method="random", permutations=1000)
+  boxplot_data <- as.data.frame(t(accumulation$perm))
+  
+  return(boxplot_data)
+  
+}
+
+plot_S1D <- function(species_data, subspecies_data, genera_data){
+
+    boxplot_data_s <- species_accumulation(species_data, "species")
+    boxplot_data_ss <- species_accumulation(subspecies_data, "subspecies")
+    boxplot_data_g <- species_accumulation(genera_data, "genera")
+
+  
+    accum_s_long <- pivot_longer(boxplot_data_s, cols=everything(),
+                                 names_to = "Samples", 
+                                 values_to = "Richness_value") %>%
+      mutate(SampleNum = as.numeric(gsub("V", "", Samples)), Taxa = "species")
+  
+    accum_ss_long <- pivot_longer(boxplot_data_ss, cols=everything(), 
+                                  names_to = "Samples", values_to = "Richness_value") %>%
+      mutate(SampleNum = as.numeric(gsub("V", "", Samples)), Taxa= "subspecies")
+    
+    accum_g_long <- pivot_longer(boxplot_data_g, cols=everything(),
+                                 names_to = "Samples", values_to = "Richness_value") %>%
+      mutate(SampleNum = as.numeric(gsub("V", "", Samples)), Taxa= "genera")
+    
+    accum_merge <- rbind(as.data.frame(accum_s_long), as.data.frame(accum_ss_long),
+                         as.data.frame(accum_g_long))
+
+    accum_plot <- ggplot(data=accum_merge, aes(x=factor(SampleNum), y=Richness_value, fill=Taxa))+
+      scale_fill_manual(values = other_colors) +
+      guides(fill= guide_legend(position="bottom")) +
+      geom_boxplot(size=0.1, width=1) +
+      labs(x="Number of samples evaluated", y="Cumulative number of taxa detected") +
+      scale_x_discrete(breaks=(c(1,10,20,30,40,50,60, 70, 80, 90, 95))) +
+      theme_bw() +
+      theme(text=element_text(size=12))
+
+  return(accum_plot)
+}
+
+genus_df_pas <- RPKMF_rank(esviritu_passive_filt,"genus")
+species_df_pas <- RPKMF_rank(esviritu_passive_filt,"species")
+subspecies_df_pas <- RPKMF_rank(esviritu_passive_filt, "subspecies")
+
+Fig_S1D <- plot_S1D(species_df_pas,
+                               subspecies_df_pas, 
+                               genus_df_pas)
+Fig_S1D
+
+ggsave(Fig_S1D, 
+       file = file.path(data_dir, "Fig_S1D.jpg"), 
+       width = 6, height = 4, units = "in", dpi=300)
+```
+
+
+### Tax tree
+
+
+```{r}
+tax_hierarchy_hc <- esviritu_passive_filt %>%
+  distinct(species, genus, family,
+           order, tclass, phylum) %>%
+  ungroup() %>%
+  mutate(species = gsub("\\W+", "", species)) %>%
+  mutate(genus = gsub("\\W+", "", genus)) %>%
+  mutate(family = gsub("\\W+", "", family)) %>%
+  mutate(order = gsub("\\W+", "", order)) %>%
+  mutate(tclass = gsub("\\W+", "", tclass)) %>%
+  mutate(phylum = gsub("\\W+", "", phylum))
+``` 
+
+```{r}
+tax_hierarchy_hc_df <- as.data.frame(tax_hierarchy_hc)
+
+
+tax_hierarchy_hc_df <- as.data.frame(unclass(tax_hierarchy_hc_df),
+                                 stringsAsFactors=TRUE,
+                                 row.names = "species")
+
+cols <- colnames(tax_hierarchy_hc_df)
+
+taxo_phylo_hc <- taxo2phylog(as.taxo(tax_hierarchy_hc_df))
+```
+
+```{r}
+species_meta_dt <- esviritu_passive_filt %>%
+  group_by(Site_cat) %>%
+  #count total_samples as the number of unique sample names
+  mutate(total_samples = n_distinct(sample_ID)) %>%
+  ungroup() %>%
+  #count how many distinct samples contained each species (n)
+  group_by(species, Site_cat, total_samples) %>%
+  summarize(n = n_distinct(sample_ID)) %>%
+  mutate(freq = n / total_samples) %>%
+  ungroup() %>%
+  complete(nesting(Site_cat, total_samples), species,
+           fill=list(n=0, freq=0))
+
+freq_info_dt <- species_meta_dt %>%
+  group_by(species) %>%
+  mutate(total_number = sum(n),
+         h_freq = freq/ sum(freq)) %>%
+  select(species, total_number, h_freq) %>%
+  ungroup() %>%
+  distinct() %>%
+  merge(., esviritu_passive_filt[, c("species", "family")], by="species", all.x = TRUE,
+        all.y = FALSE) %>%
+  mutate(species = gsub("\\W+", "", species))
+```
+
+```{r warning=FALSE}
+tree <- ggtree::ggtree(taxo_phylo_hc, layout = "daylight",branch.length = "scaled",
+             color="grey40", size=0.2)
+```
+
+Get the annotation commands for easier plotting:
+
+```{r}
+get_clade_annot_commands <- function(tax.phy_obj, search_data, tax_tree_data){
+  #get the family nodes
+  third_nodes <- sapply(tax.phy_obj$paths, function(path) {
+  if (length(path) >= 5) path[5] else NA
+  })
+
+  #use only the nodes with s__ on the name
+  third_nodes_idx <- grep("s__", names(third_nodes))
+  #third_nodes <- na.omit(third_nodes)
+  #return(((third_nodes[third_nodes_idx])))
+  clade_commands <- sapply(seq_along(third_nodes[third_nodes_idx]), function(i) {
+    f_node_num <- tax_tree_data@data[tax_tree_data@data$label == unname(third_nodes[i]), "node"]
+    node_label <- unique(search_data[search_data$species == names(third_nodes[i]), "family"])
+    paste0("geom_cladelab(node = ", f_node_num, 
+           ", label = '", node_label, 
+           "', fontsize = 5) +")
+  })
+
+  clade_commands <- unique(clade_commands)
+  all_clades <- paste(clade_commands, collapse="\n")
+  return(all_clades)
+}
+```
+
+
+```{r}
+#create a search table from esviritu results
+species_family_df <- esviritu_passive_filt[, c("family", "species")] %>%
+  mutate(family=gsub("f__", "", family),
+         species = gsub("\\W+", "", species))
+
+annots <- get_clade_annot_commands(taxo_phylo_hc, species_family_df, tree)
+#str(annots)
+(cat(annots))
+
+```
+
+
+```{r}
+Fig_S1E <- tree %<+% freq_info_dt + 
+
+    geom_tippoint(aes(color=family, size = total_number), alpha = 0.7) +
+  scale_size_continuous(name = "Total Detections", breaks = c(1, 10, 25, 50, 95)) +
+  scale_color_manual(values=colorRampPalette(other_colors[1:9])(33)) +
+
+  guides(size = guide_legend("Total Detections (1-95)", order=1),
+         color="none") +
+  
+  geom_cladelab(node = 562, label = 'Hepadnaviridae', fontsize = 5, hjust=0) +
+  geom_cladelab(node = 566, label = 'Retroviridae', fontsize = 5, hjust=-0.05) +
+  geom_cladelab(node = 574, label = 'Polyomaviridae', fontsize = 5, hjust=-0.05) +
+  geom_cladelab(node = 581, label = 'Papillomaviridae', fontsize = 5, hjust=-0.1) +
+  geom_cladelab(node = 599, label = 'Parvoviridae', fontsize = 5, hjust=-0.1, vjust=-0.5) +
+  geom_cladelab(node = 621, label = 'Circoviridae', fontsize = 5, hjust=0.5, vjust=-0.7) +
+  geom_cladelab(node = 626, label = 'Smacoviridae', fontsize = 5, hjust=1 ,vjust=0) +
+  geom_cladelab(node = 630, label = 'Genomoviridae', fontsize = 5, hjust=1.1, vjust=1) +
+  geom_cladelab(node = 638, label = 'Sedoreoviridae', fontsize = 5, hjust=1.1) +
+  geom_cladelab(node = 641, label = 'Spinareoviridae', fontsize = 5, hjust=1.05) +
+  geom_cladelab(node = 647, label = 'Hepeviridae', fontsize = 5, hjust=1.1, vjust=1, barsize=0) +
+  
+  geom_taxalink(taxa1="s__Paslahepevirusbalayani",taxa2="s__HepatitisEvirus",
+                color="black", curvature=0.4, offset=-0.01, ncp=3) +
+  
+  geom_cladelab(node = 652, label = 'Virgaviridae', fontsize = 5, hjust=1.1) +
+  geom_cladelab(node = 656, label = 'Flaviviridae', fontsize = 5, hjust=1) +
+  geom_cladelab(node = 661, label = 'Tombusviridae', fontsize = 5, hjust=1.05) +
+  geom_cladelab(node = 672, label = 'Phenuiviridae', fontsize = 5, hjust=1) +
+  geom_cladelab(node = 676, label = 'Orthomyxoviridae', fontsize = 5, hjust=2.2, vjust=-1, barsize=0) +
+  
+  geom_taxalink(taxa1="s__Cytomegalovirushumanbeta5",taxa2="s__Varicellovirushumanalpha3",
+                color="black", curvature=0.4, offset=-0.02, ncp=3) +
+  
+  geom_cladelab(node = 682, label = 'Paramyxoviridae', fontsize = 5, hjust=1) +
+  geom_cladelab(node = 685, label = 'Pneumoviridae', fontsize = 5, hjust=1) +
+  geom_cladelab(node = 691, label = 'Poxviridae', fontsize = 5, hjust=1) +
+  geom_cladelab(node = 696, label = 'Orthoherpesviridae', fontsize = 5, hjust=2.05, vjust=3, barsize=0) +
+  
+  geom_taxalink(taxa1="s__Alphainfluenzavirusinfluenzae",taxa2="s__Gammainfluenzavirusinfluenzae",
+                color="black", curvature=0.4, offset=-0.02, ncp=3) +
+  
+  geom_cladelab(node = 708, label = 'Picobirnaviridae', fontsize = 5, hjust=1) +
+  geom_cladelab(node = 714, label = 'Coronaviridae', fontsize = 5, hjust=1.1, vjust=0.1) +
+  geom_cladelab(node = 720, label = 'Mesoniviridae', fontsize = 5, hjust=1.1, vjust=-0.1) +
+  geom_cladelab(node = 722, label = 'Tobaniviridae', fontsize = 5, hjust=1.1, vjust=0.2) +
+  geom_cladelab(node = 725, label = 'Caliciviridae', fontsize = 5, hjust=1, vjust=1) +
+  geom_cladelab(node = 728, label = 'Dicistroviridae', fontsize = 5, hjust=1, vjust=1) +
+  geom_cladelab(node = 733, label = 'Iflaviridae', fontsize = 5,hjust=1, vjust= 1.3) +
+  geom_cladelab(node = 736, label = 'Picornaviridae', fontsize = 5, vjust=1.2, hjust=0.2) +
+  geom_cladelab(node = 746, label = 'Secoviridae', fontsize = 5, vjust=1) +
+  geom_cladelab(node = 754, label = 'Solemoviridae', fontsize = 5, hjust=-0.1) +
+  geom_cladelab(node = 759, label = 'Astroviridae', fontsize = 5, hjust=-0.1) +
+  geom_cladelab(node = 766, label = 'Adenoviridae', fontsize = 5, hjust=-0.05) +
+  geom_cladelab(node = 774, label = 'Anelloviridae', fontsize = 5, hjust=-0.05) +
+  
+  xlim(-15,15) +
+
+  theme(legend.position = "bottom", 
+        legend.direction = "horizontal",
+        #legend.box = "vertical",
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size=10),
+        panel.background = element_rect(fill = "transparent", color = NA),
+        plot.background = element_rect(fill = "transparent", color = NA),
+        legend.background = element_rect(fill = "transparent", color = NA),
+        legend.box.background = element_rect(fill = "transparent", color = NA)) 
+
+Fig_S1E
+
+ggsave(Fig_S1E, file= file.path(data_dir, "Fig_S1E.jpg"), 
+                                  width=15, height=6, dpi=300)
+```
+
+## Figure 1
+
+### A, B and C viral read plots
+
+```{r}
+#plot viral read proportion of all samples
+plot_Fig1A <- function(data, colors){
+  ggplot(data=data, aes(x=factor(Site_cat, levels=c('UH', 'WWTP', 'SA')), 
+                        y=viral_reads_percentage, fill=Site_cat)) +
+    geom_boxplot(staplewidth = 0.5,
+                 outliers = FALSE) +
+    geom_jitter(width=0.25, alpha=0.8) +
+    scale_fill_manual(values=colors) +
+    theme_bw()+
+    labs(y = "Percentage",
+         x="") +
+    theme(axis.text.x = element_text(size=14),
+          axis.text.y = element_text(size=14),
+          axis.title.y = element_text(size=14),
+          legend.position = "none",
+          panel.grid = element_line(color="white")) + 
+    scale_y_continuous(labels = function(x) paste0(x, "%"))
+
+}
+
+
+#plot number of viral reads for all samples
+plot_Fig1B <- function(data, colors){
+  ggplot(data=data, aes(x=factor(Site_cat, levels=c('UH', 'WWTP', 'SA')), 
+                        y=total_mapped, fill=Site_cat)) +
+    geom_boxplot(staplewidth = 0.5,
+                 outliers = FALSE) +
+    geom_jitter(width=0.25,alpha=0.8) +
+    scale_fill_manual(values=colors) +
+    theme_bw()+
+    labs(y = "Reads aligned to viral genomes (N)",
+         x="") +
+    scale_y_log10() +
+    theme(axis.text.x = element_text(size=14),
+          axis.title.y = element_text(size=14),
+          axis.text.y = element_text(size=14),
+          legend.position = "none",
+          panel.grid = element_line(color="white"))
+}
+
+
+#plot number of reads (total filtered) for all samples
+plot_Fig1C <- function(data, colors){
+
+  ggplot(data=data, aes(x=factor(Site_cat, levels=c('UH', 'WWTP', 'SA')), 
+                        y=total_reads, fill=Site_cat)) +
+    geom_boxplot(staplewidth = 0.5,
+                 outliers = FALSE) +
+    geom_jitter(width=0.25,alpha=0.8) +
+    scale_fill_manual(values=colors) +
+    theme_bw()+
+    labs(y = "Total number of filtered reads in sample",
+         x="") +
+    scale_y_log10() +
+    theme(axis.text.x = element_text(size=14),
+          axis.text.y = element_text(size=14),
+          axis.title.y = element_text(size=14),
+          legend.position = "none",
+          panel.grid = element_line(color="white"))
+}
+
+```
+
+
+```{r}
+v_reads <- summarize_viral_reads(esviritu_passive_filt)
+
+v_reads_meta <- merge(v_reads, esviritu_passive_filt[, c("sample_ID", "Site_cat")] %>% distinct(), by="sample_ID")
+
+Fig1A <- plot_Fig1A(v_reads_meta, site_cat_colors) 
+
+Fig1B <- plot_Fig1B(v_reads_meta, site_cat_colors) 
+
+Fig1C <- plot_Fig1C(v_reads_meta, site_cat_colors)
+
+
+plot_grid(Fig1A, Fig1B, Fig1C, ncol=3)
+
+
+ggsave(plot_grid(Fig1A, Fig1B, Fig1C, ncol=3), 
+       file = file.path(data_dir, "Fig1_ABC.jpg"), 
+       width=15, height=5, units = "in", dpi=300)
+
+```
+Kruskal-Wallis tests and Dunn's post hoc test with Bonferroni corrections
+```{r}
+kruskal.test(v_reads_meta$total_reads, v_reads_meta$Site_cat)
+kruskal.test(v_reads_meta$total_mapped, v_reads_meta$Site_cat)
+kruskal.test(v_reads_meta$viral_reads_percentage, v_reads_meta$Site_cat)
+```
+```{r}
+DunnTest(v_reads_meta$total_mapped, v_reads_meta$Site_cat,
+         method=c("bonferroni"), alternative="two.sided")
+
+DunnTest(v_reads_meta$viral_reads_percentage, v_reads_meta$Site_cat,
+         method=c("bonferroni"), alternative="two.sided")
+```
+
+### D Rarefaction plot
+
+```{r}
+read_matrix <- function(data, taxa_level){
+  rm <- data %>%
+    group_by(sample_ID, !!sym(taxa_level)) %>%
+    summarize(reads=sum(read_count)) %>%
+    ungroup()
+
+  rm <- as.data.frame(pivot_wider(data=rm,
+                    names_from = sample_ID,
+                    values_from = reads,
+                    values_fill = list(reads=0)))
+
+  return(rm)
+
+}
+
+plot_Fig1D <- function(data, taxa_level){
+  read_counts <- read_matrix(data, taxa_level)
+  
+  rarecurve_data <- read_counts[,-1]
+  rownames(rarecurve_data) <- read_counts[[taxa_level]]
+ 
+  rarecurve <-  rarecurve(t(rarecurve_data), step = 500, 
+                          label=FALSE, cex=0.2, tidy = TRUE)
+  
+  colnames(rarecurve) <- c("sample_ID", "Sample", "Taxa_level")
+  
+  plot_data <-  merge(rarecurve, esviritu_passive_filt[, c("sample_ID", "Site_cat")] %>% distinct(), by="sample_ID")
+
+  plot <- ggplot(data=plot_data, aes(x=Sample, y=Taxa_level, color=Site_cat)) +
+    geom_point(size=0.1,  alpha=0.7) +
+    theme_bw() +
+    labs(x="Number of sequences",
+        y="Number of species") +
+    scale_color_manual(values = site_cat_colors , name="") +
+    theme(legend.position = "right") +
+    guides(color = guide_legend(override.aes = list(size = 5),
+                                position="bottom"))
+  
+  return(plot)
+}
+```
+
+```{r}
+Fig1D <- plot_Fig1D(esviritu_passive_filt, "species")
+Fig1D
+
+ggsave(Fig1D, file = file.path(data_dir, "Fig1_D.jpg"), 
+       width = 6, height = 4, dpi=300)
+```
+
+### E, F and G, Species count, Shannon and Simpson
+
+```{r functions-for-adiv-calculation}
+summarize_tax_levels <- function(data){
+  data %>%
+    group_by(sample_ID) %>%
+    summarize(phylums=n_distinct(phylum),
+              classes=n_distinct(tclass),
+              orders=n_distinct(order),
+              families=n_distinct(family),
+              genera=n_distinct(genus),
+              species=n_distinct(species),
+              subspecies=n_distinct(subspecies),
+              .groups="drop")
+}
+
+RPKMF_df <- function(data, tax_level, RPKMF_type){
+  RPKMF_df <- data %>%
+    group_by(sample_ID, !!sym(tax_level)) %>%
+    summarize(RPKMF = sum(!!sym(RPKMF_type))) %>%
+    ungroup()
+  
+  RPKMF_df_wide <-pivot_wider(data=RPKMF_df,
+                    names_from = sample_ID,
+                    values_from = RPKMF,
+                    values_fill = list(RPKMF=0))
+
+  return(RPKMF_df_wide)
+}
+```
+
+```{r alpha-diversity-calculation}
+#calculate alpha diversity metrics for species level data
+alpha_diveristy_calc <- function(data, RPKMF_type){
+  
+  species_df <- RPKMF_df(data, "species", RPKMF_type)
+  adiv <- data.frame(sample_ID=colnames(species_df[,-1]),
+                  shannon_index = diversity(x=t(species_df[,-1]), 
+                                            index="shannon",
+                                            equalize.groups = FALSE),
+                  simpson_index_inv = diversity(x=t(species_df[,-1]), 
+                                            index="invsimpson",
+                                            equalize.groups = FALSE),
+                  species_count = summarize_tax_levels(data)$species)
+
+  #add metadata to alpha diversity 
+  adiv <- merge(adiv, esviritu_passive_filt[, c("sample_ID", "Site_cat", "filtered_reads_in_sample")] %>% distinct(), by="sample_ID")
+
+  return(adiv)
+  
+}
+
+alpha_div_passive <- alpha_diveristy_calc(esviritu_passive_filt, "RPKMF_norm")
+```
+
+```{r plots-of-alphadiv-distributions}
+Fig1E <- ggplot(data = alpha_div_passive, 
+                  aes(x=factor(Site_cat, levels=c('UH', 'WWTP', 'SA')), 
+                      y=species_count, fill=Site_cat)) +
+  geom_boxplot(staplewidth = 0.5,
+                 outliers = FALSE) +
+  geom_jitter(width=0.25,alpha=0.8) +
+  scale_fill_manual(values=site_cat_colors) +
+  guides(fill="none") +
+  labs(x="", y="Species count (N)") +
+  theme_bw() +
+    theme(axis.text.x = element_text(size=14),
+          axis.text.y = element_text(size=14),
+          axis.title.y = element_text(size=14),
+          legend.position = "none",
+          panel.grid = element_line(color="white"))
+
+Fig1F <- ggplot(data = alpha_div_passive, 
+                  aes(x=factor(Site_cat, levels=c('UH', 'WWTP', 'SA')), 
+                      y=shannon_index, fill=Site_cat)) +
+  geom_boxplot(staplewidth = 0.5,
+                 outliers = FALSE) +
+  geom_jitter(width=0.25,alpha=0.8) +
+  scale_fill_manual(values=site_cat_colors)+
+  guides(fill="none") +
+  labs(x="", y="Shannon index") +
+  theme_bw()+
+    theme(axis.text.x = element_text(size=14),
+          axis.text.y = element_text(size=14),
+          axis.title.y = element_text(size=14),
+          legend.position = "none",
+          panel.grid = element_line(color="white"))
+
+Fig1G <- ggplot(data = alpha_div_passive, 
+                  aes(x=factor(Site_cat, levels=c('UH', 'WWTP', 'SA')), 
+                      y=simpson_index_inv, fill=Site_cat)) +
+  geom_boxplot(staplewidth = 0.5,
+                 outliers = FALSE) +
+  geom_jitter(width=0.25,alpha=0.8) +
+  scale_fill_manual(values=site_cat_colors)+
+  guides(fill="none") +
+  labs(x="", y="Simpson index (1/D)") +
+  theme_bw()+
+    theme(axis.text.x = element_text(size=14),
+          axis.text.y = element_text(size=14),
+          axis.title.y = element_text(size=14),
+          legend.position = "none",
+          panel.grid = element_line(color="white"))
+
+Fig1E
+Fig1F
+Fig1G
+
+ggsave(plot_grid(Fig1E, Fig1F, Fig1G, ncol=3), 
+       file = file.path(data_dir, "Fig1_EFG.jpg"), 
+       width=15, height=5, units = "in", dpi=300)
+```
+
+Kruskal-Wallis and Dunn's post hoc test for alpha diversity metrics
+
+```{r}
+kruskal.test(alpha_div_passive$species_count, alpha_div_passive$Site_cat)
+kruskal.test(alpha_div_passive$shannon_index, alpha_div_passive$Site_cat)
+kruskal.test(alpha_div_passive$simpson_index_inv, alpha_div_passive$Site_cat)
+```
+
+
+```{r}
+DunnTest(alpha_div_passive$species_count, alpha_div_passive$Site_cat,
+         method=c("bonferroni"), alternative="two.sided")
+
+DunnTest(alpha_div_passive$shannon_index, alpha_div_passive$Site_cat,
+         method=c("bonferroni"), alternative="two.sided")
+
+DunnTest(alpha_div_passive$simpson_index_inv, alpha_div_passive$Site_cat,
+         method=c("bonferroni"), alternative="two.sided")
+```
+
+### H Bray-Curtis PCoA
+
+```{r PCoA-Bray-Curtis}
+plot_Fig1H <- function(data, taxa_level, RPKMF_type){
+
+  #calculate RPKMF df (cols species, rows samples)
+  RPKMF_df <- RPKMF_df(data, taxa_level, RPKMF_type)
+  
+  bray_curtis <- as.data.frame(as.matrix(vegdist(t(RPKMF_df[,-1]))), method="bray")
+  
+  bray_curtis$sample_ID1 <- rownames(bray_curtis)
+
+  pcoa <- cmdscale(bray_curtis[,-ncol(bray_curtis)], eig=TRUE)
+  pcoa_df <- as.data.frame(pcoa$points)
+  pcoa_df$sample_ID <- bray_curtis$sample_ID1
+
+  pcoa_df_meta <- merge(pcoa_df, esviritu_passive_filt[, c("sample_ID", "Site_cat", "City")] %>% distinct(), by="sample_ID")
+  
+  #explained variance by PC 
+  
+  pcoa_eig <- pcoa$eig
+  pcoa_eig_pos <- pcoa_eig[pcoa_eig>0]
+  
+  exp_var <- pcoa_eig_pos /(sum(pcoa_eig_pos))
+  #return(exp_var)
+  
+  PC1_var <- round(exp_var[1]*100, 2)
+  PC2_var <- round(exp_var[2]*100, 2)
+
+  plot <- ggplot() +
+  geom_vline(xintercept=0, color="grey80", alpha=0.8) +
+  geom_hline(yintercept=0, color="grey80", alpha=0.8) +
+  
+  geom_point(data=pcoa_df_meta, 
+             aes(x = V1, y = V2, 
+                 color=Site_cat,
+                 shape=City, group=Site_cat), 
+             size=4, alpha=0.9) +
+    
+  labs(x=sprintf("Bray-Curtis PCoA1 (%s %%)", PC1_var), 
+       y= sprintf("Bray-Curtis PCoA2 (%s %%)", PC2_var)) +
+  scale_color_manual(values=site_cat_colors, name="Location") + 
+  scale_shape_manual(values=c(15, 16), name="City") +
+  guides(color=guide_legend(position="bottom"),
+         shape=guide_legend(position="bottom")) +
+  theme_bw()+
+    theme(panel.grid = element_line(color="white")) 
+
+}
+
+```
+
+```{r}
+Fig1H <- plot_Fig1H(data=esviritu_passive_filt, 
+                       taxa_level="species", RPKMF_type = "RPKMF_norm")
+
+
+Fig1H
+
+ggsave(Fig1H, file=file.path(data_dir, "Fig1_H.jpg"), 
+                                  width=6, height=4, dpi=300)
+```
+
+PERMANOVA on Bray-Curtis distance
+```{r}
+RPKMF_data <- RPKMF_df(esviritu_passive_filt, "species", "RPKMF_norm")
+bray_curtis <- as.data.frame(as.matrix(vegdist(t(RPKMF_data[,-1]))), method="bray")
+
+meta_bc <- esviritu_passive_filt %>%
+  select(sample_ID, Site_cat) %>%
+  distinct() %>%
+  as.data.frame()
+
+rownames(meta_bc) <- meta_bc$sample_ID
+
+meta_bc <- meta_bc[rownames(bray_curtis), ]
+
+permanova_bc <- adonis2(bray_curtis ~ Site_cat, data=meta_bc,
+                                    permutations=999, by="margin")
+
+permanova_bc
+```
+
+
+```{r}
+bd <- betadisper(vegdist(t(RPKMF_data[,-1]), method="bray"), meta_bc$Site_cat)
+
+permutest(bd, permutations = 999)
+```
+
+
+
+### I stacked bar plot of family level detections
+
+```{r}
+set.seed(26) #set seed to get right colors
+
+barplot_data <- esviritu_passive_filt %>%
+ # merge(., esviritu_passive_filt[, c("sample_ID", "Site_cat")] %>% distinct(), by="sample_ID") %>%
+  mutate(family =gsub("f__", "", family)) %>%
+  filter(!is.na(family)) %>%
+  group_by(Site_cat, family) %>%
+  summarize(RPKMF_norm = sum(RPKMF_norm), .groups="drop") %>%
+  ungroup() %>%
+  group_by(Site_cat) %>%
+  arrange(desc(RPKMF_norm), .by_group = TRUE) %>%
+    mutate(family = ifelse(row_number() > 8, "Others", family)) %>%
+    group_by(Site_cat, family) %>%
+    summarise(total_value = sum(RPKMF_norm), .groups = "drop")
+
+
+family_order <- barplot_data %>%
+  group_by(family) %>%
+  summarize(RPKMF_sum=sum(total_value)) %>%
+  arrange(desc((RPKMF_sum))) %>%
+  pull(family)
+
+family_ordered_top <- c(family_order[family_order != "Others"], "Others")
+  
+barplot_data$family <- factor(barplot_data$family,
+                              levels = rev(family_ordered_top))
+
+
+colors <- sample(colorRampPalette(other_colors[1:9])(10))
+names(colors) <- unique(barplot_data %>% filter(family != "Others" & !is.na(family)) %>% pull(family))
+
+colors_plus_other <- c(colors, "Others" = "grey60")
+
+
+Fig1I <- ggplot(barplot_data, aes(fill=family, y=total_value, x=factor(Site_cat, levels=c("UH", "WWTP", "SA")))) + 
+    geom_bar(position="fill", stat="identity") +
+  scale_fill_manual(values=colors_plus_other) +
+  guides(fill = guide_legend(reverse = TRUE,
+                             position="bottom", ncol=5)) +
+  theme_bw() +
+  theme(legend.spacing.y = unit(0, "cm"),
+        legend.key.height = unit(0.2, "cm"),
+        legend.text = element_text(size=14),
+        axis.text.x = element_text(size=14),
+        axis.text.y = element_text(size=14),
+        legend.title = element_text(size=14)) +
+  labs(x="", y="Relative normalized RPKMF") +
+  scale_y_continuous(labels = function(x) paste0(x*100, "%"))
+
+Fig1I
+
+ggsave(Fig1I, file=file.path(data_dir, "Fig1_I.jpg"), 
+                                  width=9, height=8, dpi=300)
+```
+### J and K Host distribution by accession and RPKMF
+
+```{r functions-for-pie-charts}
+summarize_tax_levels <- function(data, col, taxa_level){
+  data <- data %>%
+    group_by(!!sym(col)) %>%
+    summarize(phylums=n_distinct(phylum),
+              classes=n_distinct(tclass),
+              orders=n_distinct(order),
+              families=n_distinct(family),
+              genera=n_distinct(genus),
+              species=n_distinct(species),
+              subspecies=n_distinct(subspecies),
+              Accession=n_distinct(Accession),
+              .groups="drop") %>%
+    mutate(total_value=!!sym(taxa_level)) %>%
+    rename(category=!!sym(col)) %>%
+    filter(category != "" & !is.na(category)) %>%
+    arrange(desc(total_value)) %>%
+    mutate(category = ifelse(row_number() > 7 | category=="" , "Others", category)) %>%
+    group_by(category) %>%
+    summarize(total_value=sum(total_value), .groups="drop") %>%
+    mutate(proportion = 100 * total_value / sum(total_value)) %>%
+    arrange((total_value))
+  
+  return(data)
+  
+}
+
+sum_cat_top_N <- function(data, col, val){
+  data <- data %>%
+    group_by(!!sym(col)) %>%
+    summarize(total_value=sum(!!sym(val)), .groups="drop") %>%
+    rename(category = !!sym(col)) %>%
+    filter(category != "" & !is.na(category)) %>%
+    arrange(desc(total_value)) %>%
+    mutate(category = ifelse(row_number() > 7 | category=="", "Others", category)) %>%
+    group_by(category) %>%
+    summarise(total_value = sum(total_value), .groups = "drop")%>% 
+    mutate(proportion = 100 * total_value / sum(total_value),
+         category=category) %>%
+    arrange((total_value))
+  
+  return(data)
+  
+}
+```
+
+```{r}
+host_acc_UH <- summarize_tax_levels(esviritu_passive_filt %>% filter(Site_cat=="UH"), 
+                                    "host_genus", "Accession") %>%
+  mutate(Site_cat="UH",
+         datatype="Accesion") 
+
+host_rpkmf_UH <- sum_cat_top_N(esviritu_passive_filt %>% filter(Site_cat=="UH"), 
+                               "host_genus", "RPKMF_norm") %>%
+  mutate(Site_cat="UH",
+         datatype="RPKMF") 
+
+host_acc_SA <- summarize_tax_levels(esviritu_passive_filt %>% filter(Site_cat=="SA"), 
+                                    "host_genus", "Accession") %>%
+  mutate(Site_cat="SA",
+         datatype="Accesion") 
+
+host_rpkmf_SA <- sum_cat_top_N(esviritu_passive_filt %>% filter(Site_cat=="SA"), 
+                               "host_genus", "RPKMF_norm") %>%
+  mutate(Site_cat="SA",
+         datatype="RPKMF") 
+
+host_acc_WWTP <- summarize_tax_levels(esviritu_passive_filt %>% filter(Site_cat=="WWTP"), 
+                                      "host_genus", "Accession") %>%
+  mutate(Site_cat="WWTP",
+         datatype="Accesion") 
+
+host_rpkmf_WWTP <- sum_cat_top_N(esviritu_passive_filt %>% filter(Site_cat=="WWTP"), 
+                                 "host_genus", "RPKMF_norm") %>%
+  mutate(Site_cat="WWTP",
+         datatype="RPKMF")
+```
+
+```{r}
+host_colors <- c("Homo" = "#8A6399",
+                 "Others" = "grey60",
+                 "Sus" = "#197C3F",
+                 "Gallus" = "#3B459F",
+                 "Bos" = "#7BC3DA",
+                 "Canis" = "#DFD43D",
+                 "Felis" = "#D45F0B",
+                 "Capsicum" = "#A47E58",
+                 "Equus" = "#4E95D4",
+                 "Culex" = "#948D28",
+                 "Vitis" = "#456DBA",
+                 "Solanum" = "#a1c999",
+                 "Contamination" = "#CC79A7",
+                 "Cucurbita" = "#D1683F",
+                 "Hipposideros" = "#A64799",
+                 "Aphis" = "#D6DE6B")
+```
+
+
+```{r}
+pie_data_ACC <- rbind(host_acc_UH, 
+                  host_acc_SA, 
+                  host_acc_WWTP) %>%
+  group_by(Site_cat) %>%
+  arrange(desc(total_value), .by_group = TRUE) 
+
+pie_data_ACC$category <- forcats::fct_reorder(
+  pie_data_ACC$category,
+  pie_data_ACC$total_value,
+  .fun = sum,
+  .desc = FALSE
+)
+
+pie_data_ACC$category <- pie_data_ACC$category |>
+  forcats::fct_reorder(
+    pie_data_ACC$total_value,
+    .fun = sum,
+    .desc = FALSE
+  )
+
+pie_data_ACC$category <- forcats::fct_relevel(pie_data_ACC$category, "Others")
+
+Fig_1J <- ggplot(data = pie_data_ACC,
+       aes(y = factor(Site_cat, levels=c("SA", "WWTP", "UH")), x = total_value, fill = category)) +
+  geom_bar(position="fill", stat="identity", width = 0.7) +
+  scale_fill_manual(values=host_colors) +
+  #scale_fill_manual(values=sample(colorRampPalette(other_colors[1:9])(20))) +
+  scale_x_continuous(labels = function(x) paste0(x*100, "%")) +
+   theme_bw() +
+  theme(panel.spacing.y = unit(0, "lines")) +
+  guides(fill = guide_legend(title="Host Genus", reverse = TRUE)) +
+  labs(x="Relative Accession counts", y="")
+
+Fig_1J
+
+ggsave(fig_1J, file= file.path(data_dir, "Fig1_J.jpg"), 
+                                  width=10, height=4, dpi=300)
+```
+
+```{r}
+pie_data_RPKMF <- rbind(host_rpkmf_UH,
+                  host_rpkmf_SA,
+                  host_rpkmf_WWTP) %>%
+  group_by(Site_cat) %>%
+  arrange(desc(total_value), .by_group = TRUE) 
+
+pie_data_RPKMF$category <- pie_data_RPKMF$category |>
+  forcats::fct_reorder(
+    pie_data_RPKMF$total_value,
+    .fun = sum,
+    .desc = FALSE
+  )
+
+pie_data_RPKMF$category <- forcats::fct_relevel(pie_data_RPKMF$category, "Others")
+
+
+
+Fig_1K <- ggplot(data = pie_data_RPKMF,
+       aes(y = factor(Site_cat, levels=c("SA", "WWTP", "UH")), x = total_value, fill = category)) +
+  geom_bar(position="fill", stat="identity", width = 0.7) +
+  scale_fill_manual(values=host_colors) +
+  scale_x_continuous(labels = function(x) paste0(x*100, "%")) +
+   theme_bw() +
+  theme(panel.spacing.y = unit(0, "lines")) +
+  guides(fill = guide_legend(title="Host Genus", reverse = TRUE)) +
+  labs(x="Relative normalized RPKMF", y="")
+
+Fig_1K
+
+ggsave(fig_1K, file= file.path(data_dir, "Fig1_K.jpg"), 
+                                  width=10, height=4, dpi=300)
+```
