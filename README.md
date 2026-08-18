@@ -64,7 +64,6 @@ Open the repository in GitHub Codespaces. The development container installs the
 Each analysis can then be run from the terminal:
 
 ```bash
-python Figure1.py
 python Figure2.py
 python Figure3.py
 python Figure4.py
