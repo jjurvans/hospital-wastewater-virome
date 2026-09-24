@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Jul 27 15:09:31 2026
+Created on Wed Sep 23 10:40:22 2026
 
 @author: jaanajurvansuu
 
@@ -40,6 +40,8 @@ General notes
   avoid bias caused by differing numbers of viral taxa per sample.
 - Sample locations (UH, WWTP, SA1 and SA2) are extracted from sample_ID,
   with SA1 and SA2 combined as SA.
+- Health-register profiles and correlations are included only when at least
+  one month has 10 or more diagnosed cases.
 - Figures are saved as 300 dpi PNG files only.
 - Statistical results are exported separately as TSV files.
 - All figures use a common publication style (Arial font, Seaborn 'ticks'
@@ -1191,6 +1193,11 @@ colours = {"WWTP": PALETTE["WWTP"], "UH": PALETTE["UH"], "health": "#000000"}
 # Significance criterion.
 significance_alpha = 0.05
 
+# A diagnostics profile is used only when at least one month has 10 or more
+# diagnosed cases.  This prevents correlations and plotted register curves
+# from being interpreted when the clinical series is too sparse.
+MINIMUM_HEALTH_CASES_IN_ANY_MONTH = 10
+
 # Figure geometry.
 row_offset = 1.35
 profile_height = 1.0
@@ -1711,7 +1718,12 @@ def run_panel_b(input_file: Path, output_dir: Path) -> None:
                 .to_numpy(dtype=float)
             )
 
-            if health_category is not None:
+            health_eligible = (
+                health_category is not None
+                and np.nanmax(health_values) >= MINIMUM_HEALTH_CASES_IN_ANY_MONTH
+            )
+
+            if health_eligible:
 
                 wwtp_correlation = safe_correlations(
                     wwtp_values,
@@ -1777,6 +1789,7 @@ def run_panel_b(input_file: Path, output_dir: Path) -> None:
                 "species": species,
                 "display_name": species_display.get(species, species),
                 "health_category": health_category,
+                "health_data_eligible": health_eligible,
 
                 "WWTP_health_n_months":
                     wwtp_correlation["n_months"],
@@ -1828,6 +1841,7 @@ def run_panel_b(input_file: Path, output_dir: Path) -> None:
                     "species": species,
                     "display_name": species_display.get(species, species),
                     "health_category": health_category,
+                    "health_data_eligible": health_eligible,
                     "month": month,
                     "month_label": month_labels[month_index],
 
@@ -1963,7 +1977,12 @@ def run_panel_b(input_file: Path, output_dir: Path) -> None:
             # Health register as a continuous black line.
             health_category = species_to_health_category.get(species)
 
-            if health_category is not None:
+            health_eligible = (
+                health_category is not None
+                and np.nanmax(health_values) >= MINIMUM_HEALTH_CASES_IN_ANY_MONTH
+            )
+
+            if health_eligible:
 
                 health_values = np.asarray(
                     health_data[city][health_category],
@@ -2693,6 +2712,235 @@ def run_panels_cde(
         output_dir / "Figure5_E_tropism_accession_composition.png",
     )
 
+def run_panel_a(maaslin_results_file: Path, output_dir: Path) -> None:
+    """Create the self-contained MaAsLin3 abundance-versus-prevalence plot."""
+
+    comparisons = {"UH vs WWTP": "o", "UH vs SA": "^"}
+    effect_colours = {
+        "UH": "#E67E22", "WWTP": "#2E86C1",
+        "SA": "#239B56", "Shared": "#7F8C8D",
+    }
+
+    def read_effect_comparison(name: str) -> pd.DataFrame:
+        code = {"UH vs WWTP": "UH_vs_WWTP", "UH vs SA": "UH_vs_SA"}[name]
+        data = pd.read_csv(maaslin_results_file, sep="\t", low_memory=False)
+        required = {
+            "comparison", "metadata", "feature", "model", "coef", "stderr",
+            "qval_individual", "qval_joint",
+        }
+        missing = required.difference(data.columns)
+        if missing:
+            raise ValueError("Missing MaAsLin3 columns: " + ", ".join(sorted(missing)))
+        data = data.loc[
+            data["comparison"].astype(str).eq(code)
+            & data["metadata"].astype(str).eq("comparison_group")
+        ].copy()
+        data["model"] = data["model"].astype(str).str.lower()
+        data = data.loc[data["model"].isin(["abundance", "prevalence"])].copy()
+        for column in ("coef", "stderr", "qval_individual", "qval_joint"):
+            data[column] = pd.to_numeric(data[column], errors="coerce")
+        data = data.sort_values("qval_individual").drop_duplicates(["feature", "model"])
+        wide = data.pivot(
+            index="feature", columns="model",
+            values=["coef", "stderr", "qval_individual", "qval_joint"],
+        )
+        wide.columns = [f"{field}_{model}" for field, model in wide.columns]
+        wide = wide.reset_index()
+        for column in (
+            "coef_abundance", "coef_prevalence", "stderr_abundance", "stderr_prevalence",
+            "qval_individual_abundance", "qval_individual_prevalence",
+            "qval_joint_abundance", "qval_joint_prevalence",
+        ):
+            if column not in wide:
+                wide[column] = np.nan
+        wide["abundance_sig"] = wide["qval_individual_abundance"] < FDR
+        wide["prevalence_sig"] = wide["qval_individual_prevalence"] < FDR
+        wide = wide.loc[wide[["abundance_sig", "prevalence_sig"]].any(axis=1)].copy()
+        wide["species"] = wide["feature"].astype(str).str.replace(r"^s__", "", regex=True)
+        wide["comparison"] = name
+        wide["best_q"] = wide[
+            ["qval_individual_abundance", "qval_individual_prevalence",
+             "qval_joint_abundance", "qval_joint_prevalence"]
+        ].min(axis=1).clip(lower=1e-300)
+        return wide
+
+    def effect_direction(row: pd.Series) -> str:
+        values = []
+        if row["abundance_sig"]:
+            values.append(row["coef_abundance"])
+        if row["prevalence_sig"]:
+            values.append(row["coef_prevalence"])
+        if any(value > 0 for value in values):
+            return "WWTP" if row["comparison"] == "UH vs WWTP" else "SA"
+        return "UH"
+
+    def rim_style(species: str) -> tuple[str, float]:
+        if species in DARK_RED_RIM_VIRUSES:
+            return DARK_RED, 2.7
+        if species in BLACK_RIM_VIRUSES:
+            return "black", 2.3
+        return "black", 0.65
+
+    results = pd.concat(
+        [read_effect_comparison(name) for name in comparisons], ignore_index=True,
+    )
+    results["enriched"] = results.apply(effect_direction, axis=1)
+    # UH is the reference group in MaAsLin3: reverse signs so positive values
+    # consistently mean higher abundance/prevalence in UH.
+    results["z_abundance"] = -results["coef_abundance"] / results["stderr_abundance"]
+    results["z_prevalence"] = -results["coef_prevalence"] / results["stderr_prevalence"]
+    results = results.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=["z_abundance", "z_prevalence"],
+    ).copy()
+    if results.empty:
+        raise ValueError("No plottable MaAsLin3 associations at the selected FDR.")
+
+    comparator_support = results.loc[
+        results["enriched"].isin(["WWTP", "SA"])
+    ].groupby("species")["comparison"].agg(set)
+    shared_comparator = {
+        species for species, support in comparator_support.items()
+        if support == set(comparisons)
+    }
+    uh_support = results.loc[results["enriched"].eq("UH")].groupby("species")["comparison"].agg(set)
+    shared_uh = {
+        species for species, support in uh_support.items()
+        if support == set(comparisons)
+    }
+    results["colour"] = results["enriched"]
+    results.loc[
+        results["species"].isin(shared_comparator)
+        & results["enriched"].isin(["WWTP", "SA"]), "colour",
+    ] = "Shared"
+    results["shared_comparison"] = (
+        results["species"].isin(shared_comparator)
+        & results["enriched"].isin(["WWTP", "SA"])
+    ) | (
+        results["species"].isin(shared_uh) & results["enriched"].eq("UH")
+    )
+    results["merge_key"] = [
+        f"UH::{species}" if shared and group == "UH"
+        else f"Comparator::{species}" if shared
+        else f"Single::{index}"
+        for index, (species, group, shared) in enumerate(
+            zip(results["species"], results["enriched"], results["shared_comparison"])
+        )
+    ]
+    merged_rows = []
+    for key, subset in results.groupby("merge_key", sort=False):
+        row = subset.loc[subset["best_q"].idxmin()].copy()
+        if key.startswith(("UH::", "Comparator::")):
+            row["z_abundance"] = subset["z_abundance"].mean()
+            row["z_prevalence"] = subset["z_prevalence"].mean()
+            row["best_q"] = subset["best_q"].min()
+            row["comparison"] = "Both"
+            row["shared_comparison"] = True
+            row["colour"] = "UH" if key.startswith("UH::") else "Shared"
+        merged_rows.append(row)
+    results = pd.DataFrame(merged_rows).reset_index(drop=True)
+
+    strength = -np.log10(results["best_q"])
+    results["marker_size"] = 80 + 220 * (strength - strength.min()) / max(
+        1e-9, strength.max() - strength.min(),
+    )
+    results["plot_x"] = results["z_abundance"]
+    results["plot_y"] = results["z_prevalence"]
+    x_span = max(1.0, results["z_abundance"].max() - results["z_abundance"].min())
+    y_span = max(1.0, results["z_prevalence"].max() - results["z_prevalence"].min())
+    placed: list[tuple[float, float, float]] = []
+    for index in results.sort_values("best_q").index:
+        plot_x, plot_y = results.loc[index, ["plot_x", "plot_y"]]
+        radius = 0.030 + 0.000035 * np.sqrt(results.loc[index, "marker_size"])
+        for _ in range(120):
+            pushes = []
+            for old_x, old_y, old_radius in placed:
+                dx, dy = (plot_x - old_x) / x_span, (plot_y - old_y) / y_span
+                distance = np.hypot(dx, dy)
+                if distance < radius + old_radius:
+                    if distance == 0:
+                        dx, dy, distance = 0.7, 0.7, np.hypot(0.7, 0.7)
+                    pushes.append(((radius + old_radius - distance) * dx / distance,
+                                   (radius + old_radius - distance) * dy / distance))
+            if not pushes:
+                break
+            plot_x += 0.45 * sum(dx for dx, _ in pushes) * x_span
+            plot_y += 0.45 * sum(dy for _, dy in pushes) * y_span
+        results.loc[index, ["plot_x", "plot_y"]] = plot_x, plot_y
+        placed.append((plot_x, plot_y, radius))
+
+    results.to_csv(output_dir / "Figure5_A_MaAsLin3_effects.tsv", sep="\t", index=False)
+    figure, axis = plt.subplots(figsize=(18, 11))
+    for _, row in results.iterrows():
+        edge, width = rim_style(row["species"])
+        axis.scatter(
+            row["plot_x"], row["plot_y"], s=row["marker_size"],
+            marker="D" if row["shared_comparison"] else comparisons[row["comparison"]],
+            color=effect_colours[row["colour"]], edgecolor=edge, linewidth=width,
+            alpha=0.8,
+        )
+
+    candidates = [(0, 12), (0, -14), (18, 0), (-18, 0), (18, 12), (-18, 12), (18, -14), (-18, -14)]
+    used_boxes = []
+    marker_positions = axis.transData.transform(results[["plot_x", "plot_y"]].to_numpy())
+    for is_uh, font_size, wrap_width in [(True, 12, 20), (False, 8, 24)]:
+        label_rows = results.loc[results["enriched"].eq("UH") == is_uh].sort_values("best_q")
+        for _, row in label_rows.iterrows():
+            annotation = None
+            for candidate_index, (dx, dy) in enumerate(candidates):
+                annotation = axis.annotate(
+                    textwrap.fill(row["species"], wrap_width),
+                    xy=(row["plot_x"], row["plot_y"]), xytext=(dx, dy),
+                    textcoords="offset points", ha="center",
+                    va="bottom" if dy >= 0 else "top", fontsize=font_size,
+                    fontweight="bold" if is_uh and row["species"] in (BLACK_RIM_VIRUSES | DARK_RED_RIM_VIRUSES) else "normal",
+                    color=DARK_RED if is_uh and row["species"] in DARK_RED_RIM_VIRUSES else "#303030",
+                    arrowprops={"arrowstyle": "-", "color": "#A0A0A0", "linewidth": 0.4} if candidate_index else None,
+                    zorder=4 if is_uh else 3,
+                )
+                figure.canvas.draw()
+                box = annotation.get_window_extent(figure.canvas.get_renderer()).expanded(1.04, 1.10)
+                if not any(box.overlaps(old_box) for old_box in used_boxes) and not any(box.contains(*point) for point in marker_positions):
+                    used_boxes.append(box)
+                    break
+                annotation.remove()
+                annotation = None
+            if annotation is None:
+                annotation = axis.annotate(
+                    textwrap.fill(row["species"], wrap_width),
+                    xy=(row["plot_x"], row["plot_y"]), xytext=(0, 16),
+                    textcoords="offset points", ha="center", va="bottom", fontsize=font_size,
+                    color=DARK_RED if is_uh and row["species"] in DARK_RED_RIM_VIRUSES else "#303030",
+                    arrowprops={"arrowstyle": "-", "color": "#A0A0A0", "linewidth": 0.4},
+                    zorder=4 if is_uh else 3,
+                )
+                figure.canvas.draw()
+                used_boxes.append(annotation.get_window_extent(figure.canvas.get_renderer()))
+
+    x_min, x_max = axis.get_xlim()
+    y_min, y_max = axis.get_ylim()
+    axis.set_xlim(x_min, x_max + 0.25)
+    axis.set_ylim(y_min - 0.5, y_max + 0.5)
+    axis.axhline(0, color="grey")
+    axis.axvline(0, color="grey")
+    axis.set_xlabel("Standardized abundance association (β / SE)\nWWTP/SA higher  ←     →  UH higher", fontsize=14)
+    axis.set_ylabel("Standardized prevalence association (β / SE)\nWWTP/SA higher  ←     →  UH higher", fontsize=14)
+    axis.tick_params(labelsize=11)
+    legend = [
+        Line2D([0], [0], marker="o", linestyle="none", markerfacecolor=effect_colours["UH"], markeredgecolor="black", markersize=8, label="UH"),
+        Line2D([0], [0], marker="o", linestyle="none", markerfacecolor=effect_colours["WWTP"], markeredgecolor="black", markersize=8, label="WWTP"),
+        Line2D([0], [0], marker="^", linestyle="none", markerfacecolor=effect_colours["SA"], markeredgecolor="black", markersize=8, label="SA"),
+        Line2D([0], [0], marker="D", linestyle="none", markerfacecolor=effect_colours["Shared"], markeredgecolor="black", markersize=8, label="WWTP + SA"),
+        Line2D([0], [0], marker="o", linestyle="none", markerfacecolor="white", markeredgecolor="black", markersize=8, label="UH vs WWTP"),
+        Line2D([0], [0], marker="^", linestyle="none", markerfacecolor="white", markeredgecolor="black", markersize=8, label="UH vs SA"),
+        Line2D([0], [0], marker="D", linestyle="none", markerfacecolor="white", markeredgecolor="black", markersize=8, label="Both comparisons"),
+        Line2D([0], [0], marker="o", linestyle="none", markerfacecolor="white", markeredgecolor="black", markeredgewidth=2.3, markersize=8, label="Seasonal/epidemic"),
+        Line2D([0], [0], marker="o", linestyle="none", markerfacecolor="white", markeredgecolor=DARK_RED, markeredgewidth=2.7, markersize=8, label="Latent/reactivated"),
+    ]
+    axis.legend(handles=legend, loc="upper left", frameon=False, ncol=2, fontsize=8, columnspacing=0.8, handletextpad=0.35)
+    figure.savefig(output_dir / "Figure5_A_MaAsLin3_effects.png", dpi=DPI, bbox_inches="tight")
+    plt.close(figure)
+
+
 def main() -> None:
     """Run all Figure 5 analyses."""
 
@@ -2719,3 +2967,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
