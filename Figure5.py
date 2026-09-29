@@ -1977,18 +1977,25 @@ def run_panel_b(input_file: Path, output_dir: Path) -> None:
             # Health register as a continuous black line.
             health_category = species_to_health_category.get(species)
 
-            health_eligible = (
+            # Evaluate the current species and city before drawing its health
+            # profile.  This must not reuse health_values from a prior loop.
+            if (
                 health_category is not None
-                and np.nanmax(health_values) >= MINIMUM_HEALTH_CASES_IN_ANY_MONTH
-            )
-
-            if health_eligible:
-
+                and health_category in health_data[city]
+            ):
                 health_values = np.asarray(
                     health_data[city][health_category],
                     dtype=float,
                 )
+                health_eligible = (
+                    np.nanmax(health_values)
+                    >= MINIMUM_HEALTH_CASES_IN_ANY_MONTH
+                )
+            else:
+                health_values = None
+                health_eligible = False
 
+            if health_eligible:
                 health_normalised = normalise_to_max(
                     health_values
                 )
@@ -2789,9 +2796,19 @@ def run_panel_a(maaslin_results_file: Path, output_dir: Path) -> None:
     # consistently mean higher abundance/prevalence in UH.
     results["z_abundance"] = -results["coef_abundance"] / results["stderr_abundance"]
     results["z_prevalence"] = -results["coef_prevalence"] / results["stderr_prevalence"]
-    results = results.replace([np.inf, -np.inf], np.nan).dropna(
+    results = results.replace([np.inf, -np.inf], np.nan)
+    # Keep a significant abundance-only or prevalence-only association. Its
+    # unavailable coordinate is displayed at zero, while the flags exported
+    # with the results distinguish this from an estimated zero effect.
+    results["abundance_missing"] = results["z_abundance"].isna()
+    results["prevalence_missing"] = results["z_prevalence"].isna()
+    results = results.dropna(
         subset=["z_abundance", "z_prevalence"],
+        how="all",
     ).copy()
+    results[["z_abundance", "z_prevalence"]] = results[
+        ["z_abundance", "z_prevalence"]
+    ].fillna(0)
     if results.empty:
         raise ValueError("No plottable MaAsLin3 associations at the selected FDR.")
 
@@ -2967,4 +2984,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
