@@ -123,7 +123,7 @@ run_comparison <- function(other_group) {
         input_metadata = comparison_metadata,
         output = comparison_output,
 
-        formula = "~ comparison_group",
+        formula = "~City +comparison_group",
 
         normalization = "NONE",
         transform = "LOG",
